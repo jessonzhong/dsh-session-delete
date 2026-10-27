@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Session Delete",
+    "description": "Adds a Delete action to the session list: permanently removes a session and its stored conversation data after confirmation."
+  }
+}

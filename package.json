@@ -1,0 +1,38 @@
+{
+  "name": "dsh-session-delete",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Adds a Delete action to the Harness session list that permanently removes a session and its stored data after confirmation.",
+  "author": "jessonzhong",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jessonzhong/dsh-session-delete.git"
+  },
+  "homepage": "https://github.com/jessonzhong/dsh-session-delete#readme",
+  "bugs": {
+    "url": "https://github.com/jessonzhong/dsh-session-delete/issues"
+  },
+  "keywords": ["deepseek-harness", "dsh", "dsh-plugin", "session", "delete"],
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": ["index.js", "client.js", "cordis.patch.yml", "locale/*.json", "icon.svg", "README.md", "LICENSE"],
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-ui-workspace"
+      ]
+    }
+  }
+}
