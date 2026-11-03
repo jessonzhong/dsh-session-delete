@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-delete",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "type": "module",
   "description": "Adds a Delete action to the Harness session list that permanently removes a session and its stored data after confirmation.",
