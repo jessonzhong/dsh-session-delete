@@ -181,6 +181,14 @@ async function isDirectory(path) {
 	}
 }
 
+async function isFile(path) {
+	try {
+		return (await stat(path)).isFile();
+	} catch {
+		return false;
+	}
+}
+
 /** `rm -rf` with a few retries: a live Windows handle may release just after the stop. */
 async function removeWithRetry(target, attempts = 3, delayMs = 500) {
 	let lastError;
@@ -420,6 +428,79 @@ async function deleteSession(ctx, request, signal) {
 				ctx.logger?.warn?.(`session-delete: unarchiving ${JSON.stringify(sessionId)} failed: ${String(error)}`);
 			}
 		}
+	}
+
+	// 9. Projection-cache tail: the cache service writes a mandatory,
+	// fire-and-forget checkpoint at session disposal (`session/disposed` →
+	// async `flushSoft`), which can land after the removal in step 6 and
+	// resurrect the file. Settle, then remove again with verify-retries until
+	// it stays gone.
+	const cacheNames = new Set([`${encoded}.json`, `${sessionId}.json`]);
+	await new Promise((resolve) => setTimeout(resolve, 800));
+	for (let attempt = 0; attempt < 3; attempt++) {
+		let alive = false;
+		for (const name of cacheNames) {
+			const cachePath = join(cacheDir, name);
+			try {
+				await rm(cachePath, { force: true });
+			} catch (error) {
+				ctx.logger?.warn?.(`session-delete: re-removing ${cachePath} failed: ${String(error)}`);
+			}
+			if (await isFile(cachePath)) alive = true;
+		}
+		if (!alive) break;
+		if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 500));
+	}
+	for (const name of cacheNames) {
+		const cachePath = join(cacheDir, name);
+		if ((await isFile(cachePath)) && !remaining.includes(cachePath)) {
+			remaining.push(cachePath);
+			ctx.logger?.warn?.(`session-delete: ${cachePath} was rewritten by the cache writer and could not be removed`);
+		}
+	}
+	result.filesRemaining = remaining;
+	result.filesRemoved = remaining.length === 0;
+
+	// 10. Sweep orphaned projection-cache entries. The Harness never evicts
+	// this cache, so sessions deleted earlier — or removed by hand — keep
+	// their entries forever. An entry is orphaned when its session id is
+	// neither stored (in any workspace) nor live in memory.
+	try {
+		const known = new Set();
+		const remember = (id) => {
+			const name = String(id);
+			known.add(name);
+			try {
+				known.add(encodeSegment(name));
+			} catch {
+				/* the raw form is already recorded */
+			}
+		};
+		try {
+			for (const snapshot of (await persistence?.list?.()) ?? []) {
+				const id = snapshot?.header?.id;
+				if (id !== undefined) remember(id);
+			}
+		} catch (error) {
+			ctx.logger?.warn?.(`session-delete: listing stored sessions for the cache sweep failed: ${String(error)}`);
+		}
+		try {
+			for (const session of sessionStore?.list?.() ?? []) remember(session.id);
+		} catch (error) {
+			ctx.logger?.warn?.(`session-delete: listing live sessions for the cache sweep failed: ${String(error)}`);
+		}
+		for (const entry of await readdir(cacheDir, { withFileTypes: true })) {
+			if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+			if (known.has(entry.name.slice(0, -".json".length))) continue;
+			try {
+				await rm(join(cacheDir, entry.name), { force: true });
+				ctx.logger?.info?.(`session-delete: swept orphan projection cache ${entry.name}`);
+			} catch (error) {
+				ctx.logger?.warn?.(`session-delete: sweeping orphan cache ${entry.name} failed: ${String(error)}`);
+			}
+		}
+	} catch (error) {
+		ctx.logger?.warn?.(`session-delete: orphan cache sweep failed: ${String(error)}`);
 	}
 
 	result.ok = true;
