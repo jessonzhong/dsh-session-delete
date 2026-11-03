@@ -693,21 +693,16 @@ window.__ModuleLoader__.load({
 				}
 			};
 			const deleteSession = async (sessionId, signal) => {
-				let workspaceId;
-				try {
-					const snapshot = ctx.get("workspaces")?.list?.getSnapshot?.();
-					workspaceId = (snapshot?.items ?? []).find((item) => (item.sessionIds ?? []).includes(sessionId))
-						?.workspaceId;
-				} catch {
-					workspaceId = undefined;
-				}
 				// Leaving the deleted Session first releases the main-view retain so
-				// the Host can quiesce its writer before the files are removed.
+				// the Host can quiesce its writer before the files are removed. The
+				// archive hop stops its running work and lands on the New Session
+				// hero through the host's own clearMain, so no blank session is
+				// created; the delete below removes the archived marker again.
 				if (currentMainSessionId() === sessionId) {
 					try {
-						ctx.get("uiWorkspace")?.startSession(workspaceId);
+						await ctx.get("uiWorkspace")?.archiveSession(sessionId, { stopActivity: true });
 					} catch (reason) {
-						console.warn("session-delete: navigating away before delete failed:", reason);
+						console.warn("session-delete: clearing the main view before delete failed:", reason);
 					}
 				}
 				// The mounted namespace is the Cordis service `remote.sessionDelete`;
