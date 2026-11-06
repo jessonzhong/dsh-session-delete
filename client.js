@@ -204,6 +204,7 @@ window.__ModuleLoader__.load({
 				filesRemoved: zod.z.boolean(),
 				filesRemaining: zod.z.array(zod.z.string()),
 				memoryResident: zod.z.boolean(),
+				subagentsRemoved: zod.z.number(),
 				message: zod.z.string().optional()
 			});
 		}
@@ -242,9 +243,10 @@ window.__ModuleLoader__.load({
 						filesRemoved: { type: "boolean" },
 						filesRemaining: { type: "array", items: { type: "string" } },
 						memoryResident: { type: "boolean" },
+						subagentsRemoved: { type: "integer" },
 						message: { type: "string" }
 					},
-					required: ["ok", "sessionId", "stopped", "filesRemoved", "filesRemaining", "memoryResident"],
+					required: ["ok", "sessionId", "stopped", "filesRemoved", "filesRemaining", "memoryResident", "subagentsRemoved"],
 					additionalProperties: false
 				}
 			};
@@ -525,7 +527,7 @@ window.__ModuleLoader__.load({
 			"menu.deleteSession": "Delete session\u2026",
 			"confirm.title": "Permanently delete this session?",
 			"confirm.desc": "This permanently deletes \u201c{title}\u201d and its entire stored conversation history. This cannot be undone.",
-			"confirm.warning": "Any running work in this session will be stopped first. Archived sessions are deleted too.",
+			"confirm.warning": "Any running work in this session will be stopped first. Archived sessions are deleted too. Its subagent sessions are deleted with it.",
 			"confirm.action": "Delete permanently",
 			cancel: "Cancel",
 			close: "Close",
@@ -533,13 +535,14 @@ window.__ModuleLoader__.load({
 			pending: "Deleting\u2026",
 			failed: "Delete failed: {message}",
 			partial: "The session was removed, but some files could not be deleted yet (they may still be in use): {files}",
-			memory: "The session was deleted, but its in-memory copy clears only after a Harness restart. It is kept hidden (archived) until then."
+			memory: "The session was deleted, but its in-memory copy clears only after a Harness restart. It is kept hidden (archived) until then.",
+			subagents: "{n} subagent session(s) were deleted along with it."
 		};
 		const zh = {
 			"menu.deleteSession": "删除会话…",
 			"confirm.title": "永久删除该会话？",
 			"confirm.desc": "将永久删除「{title}」及其全部已存储的对话记录，此操作不可撤销。",
-			"confirm.warning": "会话中正在运行的工作将先被停止；已归档的会话同样会被彻底删除。",
+			"confirm.warning": "会话中正在运行的工作将先被停止；已归档的会话同样会被彻底删除。其子代理会话将一并删除。",
 			"confirm.action": "永久删除",
 			cancel: "取消",
 			close: "关闭",
@@ -547,7 +550,8 @@ window.__ModuleLoader__.load({
 			pending: "正在删除…",
 			failed: "删除失败：{message}",
 			partial: "会话已删除，但部分文件暂未能清理（可能仍被占用）：{files}",
-			memory: "会话已删除，但内存中的副本要到重启 Harness 后才会彻底消失；在此之前会保持隐藏（归档）。"
+			memory: "会话已删除，但内存中的副本要到重启 Harness 后才会彻底消失；在此之前会保持隐藏（归档）。",
+			subagents: "已连同 {n} 个子代理会话一并删除。"
 		};
 		//#endregion
 
@@ -617,6 +621,7 @@ window.__ModuleLoader__.load({
 						controllerRef.current = null;
 						setBusy(false);
 						const pending = [];
+						if (result.subagentsRemoved > 0) pending.push(t("subagents", { n: result.subagentsRemoved }));
 						if (result.filesRemaining.length > 0) pending.push(t("partial", { files: result.filesRemaining.join(", ") }));
 						if (result.memoryResident) pending.push(t("memory"));
 						if (pending.length > 0) setNotes(pending);

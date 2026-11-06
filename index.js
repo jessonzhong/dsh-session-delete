@@ -46,6 +46,7 @@ const resultSchema = () =>
 		filesRemoved: z.boolean().describe("Whether every stored artifact was removed."),
 		filesRemaining: z.array(z.string()).describe("Host paths that could not be removed, usually held open by a live handle."),
 		memoryResident: z.boolean().describe("Whether an in-memory live copy could not be torn down; it clears on the next Harness restart."),
+		subagentsRemoved: z.number().int().describe("How many subagent descendant Sessions were deleted along with the target."),
 		message: z.string().optional().describe("Failure reason when ok is false.")
 	});
 
@@ -90,9 +91,10 @@ const resultCodec = () =>
 				filesRemoved: { type: "boolean" },
 				filesRemaining: { type: "array", items: { type: "string" } },
 				memoryResident: { type: "boolean" },
+				subagentsRemoved: { type: "integer" },
 				message: { type: "string" }
 			},
-			required: ["ok", "sessionId", "stopped", "filesRemoved", "filesRemaining", "memoryResident"],
+			required: ["ok", "sessionId", "stopped", "filesRemoved", "filesRemaining", "memoryResident", "subagentsRemoved"],
 			additionalProperties: false
 		}
 	);
@@ -215,9 +217,7 @@ function dshHome() {
  * outcome is collected so registry rows are always cleaned up and the caller
  * learns exactly what remained.
  */
-async function deleteSession(ctx, request, signal) {
-	const sessionId = request.sessionId;
-	const stopActivity = request.stopActivity !== false;
+async function deleteOne(ctx, sessionId, stopActivity, signal) {
 	const result = {
 		ok: false,
 		sessionId,
@@ -225,6 +225,7 @@ async function deleteSession(ctx, request, signal) {
 		filesRemoved: true,
 		filesRemaining: [],
 		memoryResident: false,
+		subagentsRemoved: 0,
 		message: undefined
 	};
 	signal?.throwIfAborted?.();
@@ -504,6 +505,54 @@ async function deleteSession(ctx, request, signal) {
 	}
 
 	result.ok = true;
+	return result;
+}
+
+/**
+ * Collect the target Session plus its subagent descendants — transitively,
+ * through any delegation depth. Subagent children are the parent's work
+ * products and leave with it; fork children are independent conversations and
+ * are never included.
+ */
+function collectSubagentFamily(ctx, rootId) {
+	const childrenOf = new Map();
+	const consider = (header) => {
+		if (header === undefined || header.origin !== "subagent" || header.parentSession === undefined) return;
+		const siblings = childrenOf.get(header.parentSession) ?? [];
+		if (!siblings.includes(header.id)) siblings.push(header.id);
+		childrenOf.set(header.parentSession, siblings);
+	};
+	try {
+		for (const snapshot of ctx.get("sessionPersistence")?.list?.() ?? []) consider(snapshot.header);
+	} catch {
+		/* a failing listing only narrows the family */
+	}
+	try {
+		for (const session of ctx.get("sessions")?.list?.() ?? []) consider(session.header);
+	} catch {
+		/* same */
+	}
+	const family = [rootId];
+	for (let index = 0; index < family.length; index++) {
+		for (const child of childrenOf.get(family[index]) ?? []) if (!family.includes(child)) family.push(child);
+	}
+	return family;
+}
+
+/** Delete one Session and, with it, every subagent Session it spawned. */
+async function deleteSession(ctx, request, signal) {
+	const stopActivity = request.stopActivity !== false;
+	// Subagent children are the Session's work products and are deleted with it;
+	// fork children are independent conversations and stay. Children go first
+	// so the target's report reflects a fully cleaned family.
+	const family = collectSubagentFamily(ctx, request.sessionId);
+	let subagentsRemoved = 0;
+	for (let index = family.length - 1; index >= 1; index--) {
+		const child = await deleteOne(ctx, family[index], stopActivity, signal);
+		if (child.ok) subagentsRemoved += 1;
+	}
+	const result = await deleteOne(ctx, family[0], stopActivity, signal);
+	result.subagentsRemoved = subagentsRemoved;
 	return result;
 }
 
